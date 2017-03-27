@@ -2,6 +2,10 @@ package mapreduce
 
 import (
 	"hash/fnv"
+	"io/ioutil"
+	"os"
+	"encoding/json"
+	"log"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -53,6 +57,44 @@ func doMap(
 	//
 	// Remember to close the file after you have written all the values!
 	//
+
+	bytes, err := ioutil.ReadFile(inFile)
+	if err != nil {
+		log.Fatal(jobName, "doMap", inFile, " error: ", err)
+	}
+	var contents = string(bytes[:])
+	var kvs = mapF(inFile, contents)
+	
+	interFiles := make(map[string]*os.File)
+	for _, kv := range kvs {
+		var reduceTaskNumber = ihash(kv.Key) % nReduce
+		var interPath = reduceName(jobName, mapTaskNumber, reduceTaskNumber)
+		file, ok := interFiles[interPath]
+		if !ok {
+			var e error
+			file, e = os.Create(interPath)
+			if e != nil {
+				log.Fatal(jobName, "doMap", inFile, interPath, " Create error: ", e)
+			}
+			interFiles[interPath] = file
+		}
+
+		var e error
+		var jsonBytes []byte
+		jsonBytes, e = json.Marshal(kv)
+		if e != nil {
+			log.Fatal(jobName, "doMap", inFile, kv, " json Marshal error: ", e)
+		}
+		var s = string(jsonBytes) + "\n"
+		_, e = file.WriteString(s)
+		if e != nil {
+			log.Fatal(jobName, "doMap", inFile, interPath, " Write error: ", e)
+		}
+	}
+
+	for _, f := range interFiles {
+		f.Close()
+	}
 }
 
 func ihash(s string) int {
