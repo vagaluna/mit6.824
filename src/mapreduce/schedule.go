@@ -34,29 +34,40 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 
 	var finished = 0
-	var scheduled = 0
+	// var scheduled = 0
+	var toSchedule = make([]int, ntasks)
+	for i := 0; i < ntasks; i++ {
+		toSchedule[i] = i
+	}
+
 	var finishChan = make(chan string)
+	var failChan = make(chan int)
 
 	for {
-		var readyWorker string
+		var readyWorker string = ""
 		select {
 		case readyWorker = <-registerChan:
 
 		case readyWorker = <-finishChan:
 			finished = finished + 1
+		case failedTask := <-failChan:
+			toSchedule = append(toSchedule, failedTask)
 		}
 		if finished == ntasks {
 			break
 		}
-		if scheduled < ntasks {
+		// if scheduled < ntasks {
+		if len(toSchedule) > 0 && len(readyWorker) > 0 {
 			var inFile string
+			var index = toSchedule[0]
 			if phase == mapPhase {
-				inFile = mapFiles[scheduled]
+				inFile = mapFiles[index]
 			} else {
 				inFile = ""
 			}
-			go sendTaskToWorker(jobName, readyWorker, inFile, phase, scheduled, n_other, finishChan)
-			scheduled = scheduled + 1
+			go sendTaskToWorker(jobName, readyWorker, inFile, phase, index, n_other, finishChan, failChan)
+			toSchedule = toSchedule[1:]
+			// scheduled = scheduled + 1
 		}
 	}
 
@@ -65,9 +76,13 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 func sendTaskToWorker(jobName string, wk string, inFile string,
 	phase jobPhase, taskIndex int, nOther int,
-	finishChan chan string) {
+	finishChan chan string, failChan chan int) {
 
 	var args = DoTaskArgs{jobName, inFile, phase, taskIndex, nOther}
-	var _ = call(wk, "Worker.DoTask", args, nil)
-	finishChan <- wk
+	var ok = call(wk, "Worker.DoTask", args, nil)
+	if ok {
+		finishChan <- wk
+	} else {
+		failChan <- taskIndex
+	}
 }
