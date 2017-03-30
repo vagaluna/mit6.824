@@ -32,5 +32,42 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 	//
+
+	var finished = 0
+	var scheduled = 0
+	var finishChan = make(chan string)
+
+	for {
+		var readyWorker string
+		select {
+		case readyWorker = <-registerChan:
+
+		case readyWorker = <-finishChan:
+			finished = finished + 1
+		}
+		if finished == ntasks {
+			break
+		}
+		if scheduled < ntasks {
+			var inFile string
+			if phase == mapPhase {
+				inFile = mapFiles[scheduled]
+			} else {
+				inFile = ""
+			}
+			go sendTaskToWorker(jobName, readyWorker, inFile, phase, scheduled, n_other, finishChan)
+			scheduled = scheduled + 1
+		}
+	}
+
 	fmt.Printf("Schedule: %v phase done\n", phase)
+}
+
+func sendTaskToWorker(jobName string, wk string, inFile string,
+	phase jobPhase, taskIndex int, nOther int,
+	finishChan chan string) {
+
+	var args = DoTaskArgs{jobName, inFile, phase, taskIndex, nOther}
+	var _ = call(wk, "Worker.DoTask", args, nil)
+	finishChan <- wk
 }
